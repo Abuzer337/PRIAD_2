@@ -1,1 +1,0 @@
-savedcmd_invisibl_cl.ko := ld -r -m elf_x86_64 -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T /usr/src/linux-headers-6.14.0-27-generic/scripts/module.lds -o invisibl_cl.ko invisibl_cl.o invisibl_cl.mod.o .module-common.o
